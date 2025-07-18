@@ -6,17 +6,16 @@ import { Link } from 'react-router-dom';
 
 function ProsPage() {
   const { currentUser } = useContext(AuthContext);
-  
-  const [isProfessional, setIsProfessional] = useState(false);
+
+  const [proData, setProData] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [proData, setProData] = useState(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDomain, setEditDomain] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  
+
   const initialAvailability = {
       lundi: { active: false, start: '09:00', end: '17:00' },
       mardi: { active: false, start: '09:00', end: '17:00' },
@@ -33,6 +32,9 @@ function ProsPage() {
   const [newServiceDuration, setNewServiceDuration] = useState('');
   const [newServiceDescription, setNewServiceDescription] = useState('');
 
+  // 👇 NOUVEAUX ÉTATS POUR LA GALERIE 👇
+  const [newImageUrl, setNewImageUrl] = useState('');
+
   const [activeTab, setActiveTab] = useState('pending');
 
   useEffect(() => {
@@ -48,21 +50,20 @@ function ProsPage() {
 
         if (proDocSnap.exists()) {
           const data = proDocSnap.data();
-          setIsProfessional(true);
           setProData(data);
-          
+
           setEditName(data.name || '');
           setEditDomain(data.domain || '');
           setEditDescription(data.description || '');
           setAvailability(prev => ({...initialAvailability, ...data.availability}));
-          
+
           const appointmentsQuery = query(collection(db, "appointments"), where("professionalId", "==", currentUser.uid));
           const appointmentsSnapshot = await getDocs(appointmentsQuery);
           const appointmentsData = appointmentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
           setAppointments(appointmentsData);
 
         } else {
-          setIsProfessional(false);
+          setProData(null);
         }
       } catch (error) {
         console.error("Erreur de chargement des données pro :", error);
@@ -72,7 +73,7 @@ function ProsPage() {
     };
     checkUserRoleAndFetchData();
   }, [currentUser]);
-  
+
   const handleAppointmentStatus = async (appointmentId, newStatus) => {
     const appointmentRef = doc(db, "appointments", appointmentId);
     try {
@@ -152,6 +153,38 @@ function ProsPage() {
     }
   };
 
+  // 👇 NOUVELLES FONCTIONS POUR LA GALERIE 👇
+  const handleAddImage = async (e) => {
+    e.preventDefault();
+    if (!newImageUrl.trim()) {
+        alert("Veuillez entrer une URL d'image valide.");
+        return;
+    }
+    const proDocRef = doc(db, "professionals", currentUser.uid);
+    try {
+        await updateDoc(proDocRef, { gallery: arrayUnion(newImageUrl) });
+        setProData(prev => ({ ...prev, gallery: [...(prev.gallery || []), newImageUrl] }));
+        setNewImageUrl('');
+        alert("Image ajoutée à la galerie !");
+    } catch (error) {
+        console.error("Erreur lors de l'ajout de l'image:", error);
+        alert("Une erreur est survenue.");
+    }
+  };
+
+  const handleDeleteImage = async (imageUrlToDelete) => {
+    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cette image ?")) return;
+    const proDocRef = doc(db, "professionals", currentUser.uid);
+    try {
+        await updateDoc(proDocRef, { gallery: arrayRemove(imageUrlToDelete) });
+        setProData(prev => ({ ...prev, gallery: prev.gallery.filter(url => url !== imageUrlToDelete) }));
+        alert("Image supprimée.");
+    } catch (error) {
+        console.error("Erreur lors de la suppression de l'image:", error);
+        alert("Une erreur est survenue.");
+    }
+  };
+
   const renderAppointmentsList = (list, type) => {
     if (list.length === 0) return <p className="text-gray-500 text-center py-4">Aucun rendez-vous dans cette catégorie.</p>;
     return list.map(rdv => (
@@ -179,7 +212,7 @@ function ProsPage() {
 
   if (loading) return <div className="text-center py-16">Vérification de votre statut...</div>;
   if (!proData) return ( <div className="text-center max-w-2xl mx-auto my-16 bg-white p-8 rounded-lg shadow-lg"><h2 className="text-2xl font-bold text-gray-800">Accès Réservé</h2><p className="text-gray-600 mt-4">Vous devez être un professionnel connecté pour voir cette page.</p></div>);
-  
+
   const pendingAppointments = appointments.filter(rdv => rdv.status === 'en attente').sort((a,b) => new Date(a.date) - new Date(b.date));
   const confirmedAppointments = appointments.filter(rdv => rdv.status === 'confirmé').sort((a,b) => new Date(a.date) - new Date(b.date));
   const pastAppointments = appointments.filter(rdv => rdv.status === 'refusé' || rdv.status === 'annulé' || (rdv.status === 'confirmé' && new Date(rdv.date) < new Date())).sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -191,7 +224,14 @@ function ProsPage() {
         <h2 className="text-3xl font-bold text-gray-800">Mon Tableau de Bord</h2>
         <Link to={`/prestataire/${currentUser.uid}`} className="text-white bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-lg transition-colors text-sm font-semibold">Voir mon profil public</Link>
        </div>
-       
+
+       {!proData.verified && (
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-8" role="alert">
+            <p className="font-bold">Profil non vérifié</p>
+            <p>Votre profil est en attente de vérification par notre équipe. Les clients ne peuvent pas encore vous trouver dans la liste.</p>
+        </div>
+       )}
+
        <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-white rounded-xl shadow-md p-6 flex items-center"><i className="fas fa-star fa-2x text-yellow-400 mr-4"></i><div><p className="text-gray-500 text-sm">Note moyenne</p><p className="text-2xl font-bold text-gray-800">{averageRating}</p></div></div>
             <div className="bg-white rounded-xl shadow-md p-6 flex items-center"><i className="fas fa-calendar-check fa-2x text-green-500 mr-4"></i><div><p className="text-gray-500 text-sm">RDV total</p><p className="text-2xl font-bold text-gray-800">{appointments.length}</p></div></div>
@@ -224,25 +264,30 @@ function ProsPage() {
                     )}
                 </section>
 
+                {/* 👇 NOUVELLE SECTION DE GESTION DE LA GALERIE 👇 */}
                 <section className="bg-white rounded-xl shadow-md p-8">
-                    <h3 className="text-2xl font-semibold text-gray-800 mb-6">Gestion des Disponibilités</h3>
-                    <div className="space-y-4">
-                        {Object.keys(availability).map(day => (
-                            <div key={day} className="grid grid-cols-3 items-center gap-4 border-t pt-4">
-                                <div className="flex items-center">
-                                    <input type="checkbox" id={day} checked={availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'active', e.target.checked)} className="h-4 w-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500" />
-                                    <label htmlFor={day} className="ml-3 block text-sm font-medium text-gray-700 capitalize">{day}</label>
-                                </div>
-                                <div className="col-span-2 grid grid-cols-2 gap-2">
-                                    <input type="time" value={availability[day].start} disabled={!availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'start', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
-                                    <input type="time" value={availability[day].end} disabled={!availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'end', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
-                                </div>
+                    <h3 className="text-2xl font-semibold text-gray-800 mb-6">Ma Galerie Photos</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        {proData.gallery && proData.gallery.map((imageUrl, index) => (
+                            <div key={index} className="relative group">
+                                <img src={imageUrl} alt={`Galerie ${index + 1}`} className="w-full h-32 object-cover rounded-lg"/>
+                                <button onClick={() => handleDeleteImage(imageUrl)} className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    &times;
+                                </button>
                             </div>
                         ))}
                     </div>
-                    <button onClick={handleAvailabilitySave} className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Enregistrer les disponibilités</button>
+                     <form onSubmit={handleAddImage} className="space-y-2 border-t pt-6">
+                        <label htmlFor="image-url" className="block text-sm font-medium text-gray-700">URL de la nouvelle image</label>
+                        <div className="flex space-x-2">
+                           <input type="url" id="image-url" placeholder="https://exemple.com/image.jpg" value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)} required className="flex-grow p-2 border rounded-md shadow-sm"/>
+                           <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Ajouter</button>
+                        </div>
+                    </form>
                 </section>
-                
+                {/* 👆 FIN DE LA NOUVELLE SECTION 👆 */}
+
+
                 <section className="bg-white rounded-xl shadow-md p-8">
                     <h3 className="text-2xl font-semibold text-gray-800 mb-6">Mes Services</h3>
                     <div className="space-y-2 mb-6">
@@ -268,6 +313,25 @@ function ProsPage() {
                         <div><label htmlFor="service-desc" className="block text-sm font-medium text-gray-700">Description (optionnel)</label><textarea id="service-desc" value={newServiceDescription} onChange={e => setNewServiceDescription(e.target.value)} rows="3" className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
                         <button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg">Ajouter le service</button>
                     </form>
+                </section>
+
+                 <section className="bg-white rounded-xl shadow-md p-8">
+                    <h3 className="text-2xl font-semibold text-gray-800 mb-6">Gestion des Disponibilités</h3>
+                    <div className="space-y-4">
+                        {Object.keys(availability).map(day => (
+                            <div key={day} className="grid grid-cols-3 items-center gap-4 border-t pt-4">
+                                <div className="flex items-center">
+                                    <input type="checkbox" id={day} checked={availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'active', e.target.checked)} className="h-4 w-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500" />
+                                    <label htmlFor={day} className="ml-3 block text-sm font-medium text-gray-700 capitalize">{day}</label>
+                                </div>
+                                <div className="col-span-2 grid grid-cols-2 gap-2">
+                                    <input type="time" value={availability[day].start} disabled={!availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'start', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
+                                    <input type="time" value={availability[day].end} disabled={!availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'end', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={handleAvailabilitySave} className="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Enregistrer les disponibilités</button>
                 </section>
             </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
 
 function AppointmentsPage() {
@@ -16,6 +16,9 @@ function AppointmentsPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
 
+  const [favoriteProfiles, setFavoriteProfiles] = useState([]);
+
+
   useEffect(() => {
     if (!currentUser) {
       setLoading(false);
@@ -25,17 +28,30 @@ function AppointmentsPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // D'abord, on vérifie si l'utilisateur est un pro
         const proDocRef = doc(db, "professionals", currentUser.uid);
         const proDocSnap = await getDoc(proDocRef);
         if (proDocSnap.exists()) {
-          setIsProfessional(true); // C'est un pro, on bloque l'accès
+          setIsProfessional(true);
         } else {
-          // Ce n'est pas un pro, donc c'est un client. On peut charger ses données.
           setIsProfessional(false);
-          const q = query(collection(db, "appointments"), where("clientId", "==", currentUser.uid), orderBy("createdAt", "desc"));
+          
+          // CORRECTION: Simplification de la requête et ajout du tri côté client
+          const q = query(collection(db, "appointments"), where("clientId", "==", currentUser.uid));
           const querySnapshot = await getDocs(q);
-          const appointmentsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          
+          let appointmentsData = querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            // Assurez-vous que createdAt est un objet Date pour le tri
+            return { 
+              id: doc.id, 
+              ...data,
+              createdAt: data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)
+            };
+          });
+
+          // Tri des rendez-vous par date de création (du plus récent au plus ancien)
+          appointmentsData.sort((a, b) => b.createdAt - a.createdAt);
+          
           setAppointments(appointmentsData);
 
           const clientDocRef = doc(db, "clients", currentUser.uid);
@@ -44,6 +60,13 @@ function AppointmentsPage() {
             const clientData = clientDocSnap.data();
             setClientName(clientData.name);
             setEditName(clientData.name);
+
+            if (clientData.favorites && clientData.favorites.length > 0) {
+                const favPromises = clientData.favorites.map(favId => getDoc(doc(db, "professionals", favId)));
+                const favDocs = await Promise.all(favPromises);
+                const favProfiles = favDocs.filter(d => d.exists()).map(docSnap => ({id: docSnap.id, ...docSnap.data()}));
+                setFavoriteProfiles(favProfiles);
+            }
           }
         }
       } catch (error) {
@@ -70,9 +93,14 @@ function AppointmentsPage() {
     }
   };
 
+  // Logique de filtrage améliorée
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Pour comparer uniquement les dates
+
   const pendingAppointments = appointments.filter(rdv => rdv.status === 'en attente');
-  const upcomingAppointments = appointments.filter(rdv => rdv.status === 'confirmé' && new Date(rdv.date) >= new Date());
-  const pastAppointments = appointments.filter(rdv => rdv.status !== 'en attente' && new Date(rdv.date) < new Date());
+  const upcomingAppointments = appointments.filter(rdv => rdv.status === 'confirmé' && new Date(rdv.date) >= today);
+  const pastAppointments = appointments.filter(rdv => rdv.status !== 'en attente' && new Date(rdv.date) < today);
+
 
   const renderAppointments = (list) => {
     if (list.length === 0) {
@@ -88,10 +116,35 @@ function AppointmentsPage() {
           ${rdv.status === 'confirmé' ? 'bg-green-100 text-green-800' : ''}
           ${rdv.status === 'en attente' ? 'bg-yellow-100 text-yellow-800' : ''}
           ${rdv.status === 'refusé' ? 'bg-red-100 text-red-800' : ''}
+          ${rdv.status === 'annulé' ? 'bg-gray-100 text-gray-800' : ''}
         `}>
           {rdv.status}
         </span>
       </div>
+    ));
+  };
+
+  const renderFavorites = (list) => {
+    if (list.length === 0) {
+        return <p className="text-gray-500 text-center py-8">Vous n'avez aucun professionnel en favori.</p>;
+    }
+    return list.map(pro => (
+        <div key={pro.id} className="border-b last:border-b-0 p-4 flex justify-between items-center">
+            <div className="flex items-center">
+                <img
+                    src={pro.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(pro.name)}&background=ffedd5&color=f97316&size=128&bold=true`}
+                    alt={pro.name}
+                    className="w-12 h-12 rounded-full mr-4"
+                />
+                <div>
+                    <p className="font-bold text-lg text-gray-800">{pro.name}</p>
+                    <p className="text-sm text-gray-600">{pro.domain}</p>
+                </div>
+            </div>
+            <Link to={`/prestataire/${pro.id}`} className="bg-orange-500 text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-orange-600">
+                Voir
+            </Link>
+        </div>
     ));
   };
 
@@ -105,7 +158,6 @@ function AppointmentsPage() {
     </div>
   );
 
-  // La nouvelle vérification pour bloquer les pros
   if (isProfessional) return (
     <div className="text-center max-w-2xl mx-auto my-16 bg-white p-8 rounded-lg shadow-lg">
       <h2 className="text-2xl font-bold text-gray-800">Accès Espace Client</h2>
@@ -120,14 +172,17 @@ function AppointmentsPage() {
         <div className="lg:col-span-2">
           <div className="bg-white rounded-xl shadow-lg">
             <div className="border-b border-gray-200">
-              <nav className="-mb-px flex space-x-6 px-6">
-                <button onClick={() => setActiveTab('pending')} className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'pending' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+              <nav className="-mb-px flex space-x-6 px-6 overflow-x-auto">
+                <button onClick={() => setActiveTab('pending')} className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab === 'pending' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
                   Demandes en attente <span className="ml-2 bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded-full">{pendingAppointments.length}</span>
                 </button>
-                <button onClick={() => setActiveTab('upcoming')} className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'upcoming' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+                <button onClick={() => setActiveTab('upcoming')} className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab === 'upcoming' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
                   RDV à venir
                 </button>
-                <button onClick={() => setActiveTab('past')} className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'past' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+                 <button onClick={() => setActiveTab('favorites')} className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab === 'favorites' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+                  Mes Favoris
+                </button>
+                <button onClick={() => setActiveTab('past')} className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${activeTab === 'past' ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
                   Historique
                 </button>
               </nav>
@@ -135,6 +190,7 @@ function AppointmentsPage() {
             <div className="p-2 min-h-[200px]">
               {activeTab === 'pending' && renderAppointments(pendingAppointments)}
               {activeTab === 'upcoming' && renderAppointments(upcomingAppointments)}
+              {activeTab === 'favorites' && renderFavorites(favoriteProfiles)}
               {activeTab === 'past' && renderAppointments(pastAppointments)}
             </div>
           </div>
@@ -175,4 +231,4 @@ function AppointmentsPage() {
   );
 }
 
-export default AppointmentsPage
+export default AppointmentsPage;

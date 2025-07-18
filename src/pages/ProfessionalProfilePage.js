@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { doc, getDoc, updateDoc, arrayUnion, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { useParams, Link, useNavigate } from 'react-router-dom'; // Ajout de useNavigate
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, addDoc, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore'; // Ajout de setDoc et serverTimestamp
 import { db } from '../firebase';
 import { AuthContext } from '../context/AuthContext';
 
@@ -9,6 +9,7 @@ const dayNames = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi",
 function ProfessionalProfilePage() {
   const { id } = useParams();
   const { currentUser } = useContext(AuthContext);
+  const navigate = useNavigate(); // Initialisation de useNavigate
 
   const [professional, setProfessional] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -21,10 +22,13 @@ function ProfessionalProfilePage() {
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
 
+  const [isClient, setIsClient] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+
+
   useEffect(() => {
     const fetchProfessional = async () => {
       setLoading(true);
-      setSelectedService(null);
       try {
         const docRef = doc(db, "professionals", id);
         const docSnap = await getDoc(docRef);
@@ -39,10 +43,71 @@ function ProfessionalProfilePage() {
         setLoading(false);
       }
     };
-    fetchProfessional();
-  }, [id]);
 
-  // --- LA FONCTION CORRIGÉE ET INTELLIGENTE ---
+    const checkUserRoleAndFavorites = async () => {
+        if (currentUser) {
+            const clientDocRef = doc(db, "clients", currentUser.uid);
+            const clientDocSnap = await getDoc(clientDocRef);
+            if (clientDocSnap.exists()) {
+                setIsClient(true);
+                const clientData = clientDocSnap.data();
+                setIsFavorite(clientData.favorites?.includes(id));
+            } else {
+                setIsClient(false);
+            }
+        }
+    };
+
+    fetchProfessional();
+    checkUserRoleAndFavorites();
+  }, [id, currentUser]);
+
+
+  const handleToggleFavorite = async () => {
+    if (!currentUser || !isClient) return;
+    const clientDocRef = doc(db, "clients", currentUser.uid);
+    try {
+        if (isFavorite) {
+            await updateDoc(clientDocRef, { favorites: arrayRemove(id) });
+            setIsFavorite(false);
+        } else {
+            await updateDoc(clientDocRef, { favorites: arrayUnion(id) });
+            setIsFavorite(true);
+        }
+    } catch (error) {
+        console.error("Erreur lors de la mise à jour des favoris", error);
+        alert("Une erreur est survenue.");
+    }
+  };
+
+  // NOUVELLE FONCTION POUR CONTACTER LE PROFESSIONNEL
+  const handleContact = async () => {
+    if (!currentUser || !isClient) return;
+
+    // Créer un ID de conversation unique et trié pour éviter les doublons
+    const conversationId = currentUser.uid > id ? `${currentUser.uid}_${id}` : `${id}_${currentUser.uid}`;
+    const conversationRef = doc(db, 'conversations', conversationId);
+
+    try {
+        const docSnap = await getDoc(conversationRef);
+        if (!docSnap.exists()) {
+            // La conversation n'existe pas, on la crée
+            await setDoc(conversationRef, {
+                participants: [currentUser.uid, id],
+                participantNames: [currentUser.displayName, professional.name],
+                lastMessage: "Conversation initiée",
+                lastMessageTimestamp: serverTimestamp(),
+            });
+        }
+        // Rediriger vers la page de messagerie avec l'ID de la conversation
+        navigate(`/messagerie?id=${conversationId}`);
+    } catch (error) {
+        console.error("Erreur lors de la création de la conversation:", error);
+        alert("Impossible de contacter ce professionnel.");
+    }
+  };
+
+
   const handleDayClick = async (day) => {
     setIsBookingLoading(true);
     const date = new Date(viewedDate.getFullYear(), viewedDate.getMonth(), day);
@@ -56,11 +121,11 @@ function ProfessionalProfilePage() {
         setIsBookingLoading(false);
         return;
       }
-      
-      const q = query(collection(db, "appointments"), 
-        where("professionalId", "==", id), 
+
+      const q = query(collection(db, "appointments"),
+        where("professionalId", "==", id),
         where("date", "==", date.toISOString().split('T')[0]),
-        where("status", "==", "confirmé") // On ne bloque que les créneaux confirmés
+        where("status", "==", "confirmé")
       );
       const querySnapshot = await getDocs(q);
       const bookedAppointments = querySnapshot.docs.map(doc => doc.data());
@@ -69,17 +134,15 @@ function ProfessionalProfilePage() {
       const serviceDuration = selectedService.duration;
       let potentialSlotTime = new Date(`${date.toDateString()} ${proAvailability.start}`);
       const endTime = new Date(`${date.toDateString()} ${proAvailability.end}`);
-      
+
       while (potentialSlotTime.getTime() + serviceDuration * 60000 <= endTime.getTime()) {
         const potentialSlotEnd = new Date(potentialSlotTime.getTime() + serviceDuration * 60000);
         let isOverlapping = false;
-        
+
         for (const rdv of bookedAppointments) {
             const rdvStart = new Date(`${date.toDateString()} ${rdv.time}`);
             const rdvEnd = new Date(rdvStart.getTime() + rdv.serviceDuration * 60000);
-            
-            // Condition de chevauchement : [start1, end1) et [start2, end2)
-            // C'est le cas si start1 < end2 ET start2 < end1
+
             if (potentialSlotTime < rdvEnd && rdvStart < potentialSlotEnd) {
                 isOverlapping = true;
                 break;
@@ -89,8 +152,7 @@ function ProfessionalProfilePage() {
         if (!isOverlapping) {
             slots.push(potentialSlotTime.toTimeString().substring(0, 5));
         }
-        
-        // On avance au prochain créneau possible (toutes les 15 minutes)
+
         potentialSlotTime.setMinutes(potentialSlotTime.getMinutes() + 15);
       }
       setAvailableSlots(slots);
@@ -105,7 +167,7 @@ function ProfessionalProfilePage() {
   const handleBookingSubmit = async () => {
     if (!currentUser) { alert("Vous devez être connecté."); return; }
     if (!selectedDay || !selectedTime || !selectedService) { alert("Veuillez sélectionner un service, une date et un créneau."); return; }
-    
+
     const newAppointment = {
       clientId: currentUser.uid,
       clientEmail: currentUser.email,
@@ -191,12 +253,29 @@ function ProfessionalProfilePage() {
     <div className="container mx-auto px-4 py-16">
       <div className="bg-white rounded-xl shadow-lg overflow-hidden max-w-4xl mx-auto">
         <div className="bg-gray-100 p-8">
-          <div className="flex flex-col md:flex-row items-start md:items-center">
+          <div className="flex flex-col md:flex-row items-start">
             <img src={avatarUrl} alt={`Avatar de ${professional.name}`} className="w-32 h-32 rounded-full border-4 border-white shadow-md" />
-            <div className="mt-4 md:mt-0 md:ml-6">
-              <h1 className="text-4xl font-bold text-gray-900">{professional.name}</h1>
-              <p className="text-xl text-orange-500 font-semibold mt-1">{professional.domain || 'Non spécifié'}</p>
-              <p className="text-md text-gray-600 mt-2"><i className="fas fa-map-marker-alt mr-2 text-gray-400"></i>{professional.commune || 'Non spécifiée'}</p>
+            <div className="mt-4 md:mt-0 md:ml-6 flex-grow">
+              <div className="md:flex justify-between items-start">
+                  <div>
+                    <h1 className="text-4xl font-bold text-gray-900 flex items-center">
+                      {professional.name}
+                      {professional.verified && (
+                        <span className="ml-4 text-sm bg-green-100 text-green-800 font-bold px-3 py-1 rounded-full flex items-center">
+                          <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path></svg>
+                          Vérifié
+                        </span>
+                      )}
+                    </h1>
+                    <p className="text-xl text-orange-500 font-semibold mt-1">{professional.domain || 'Non spécifié'}</p>
+                    <p className="text-md text-gray-600 mt-2"><i className="fas fa-map-marker-alt mr-2 text-gray-400"></i>{professional.commune || 'Non spécifiée'}</p>
+                  </div>
+                  {currentUser && isClient && currentUser.uid !== id && (
+                    <button onClick={handleToggleFavorite} className={`mt-4 md:mt-0 px-4 py-2 rounded-lg text-sm font-semibold transition ${isFavorite ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}>
+                        {isFavorite ? '❤️ Retirer des favoris' : '🤍 Ajouter aux favoris'}
+                    </button>
+                  )}
+              </div>
             </div>
           </div>
         </div>
@@ -205,6 +284,34 @@ function ProfessionalProfilePage() {
             <h2 className="text-2xl font-semibold text-gray-800 mb-3">À propos</h2>
             <p className="text-gray-700 leading-relaxed">{professional.description || 'Aucune description fournie.'}</p>
           </div>
+          
+          {/* NOUVEAU BOUTON CONTACTER */}
+          {currentUser && isClient && currentUser.uid !== id && (
+            <div className="mt-6">
+                <button
+                    onClick={handleContact}
+                    className="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+                >
+                    Contacter ce professionnel
+                </button>
+            </div>
+          )}
+
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Galerie</h2>
+            {professional.gallery && professional.gallery.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {professional.gallery.map((imageUrl, index) => (
+                  <div key={index}>
+                    <img src={imageUrl} alt={`Réalisation ${index + 1}`} className="w-full h-40 object-cover rounded-lg shadow-md"/>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500">Ce professionnel n'a pas encore ajouté de photos à sa galerie.</p>
+            )}
+          </div>
+
           <div className="mt-8 pt-6 border-t border-gray-200">
             <h2 className="text-2xl font-semibold text-gray-800 mb-4">Nos Prestations</h2>
             <div className="space-y-4">
@@ -246,7 +353,7 @@ function ProfessionalProfilePage() {
                 </div>
                 <div>
                   <h4 className="font-semibold text-gray-700 mb-4">Créneaux disponibles</h4>
-                  {isBookingLoading ? <p>Calcul des créneaux...</p> : 
+                  {isBookingLoading ? <p>Calcul des créneaux...</p> :
                    availableSlots.length > 0 ? (
                     <div className="grid grid-cols-3 gap-2">
                       {availableSlots.map(time => (<button key={time} onClick={() => setSelectedTime(time)} className={`p-2 rounded-lg border text-center transition ${selectedTime === time ? 'bg-orange-500 text-white' : 'hover:bg-orange-100'}`}>{time}</button>))}
@@ -265,7 +372,7 @@ function ProfessionalProfilePage() {
             </div>
           )}
           {selectedService && !currentUser && ( <div className="text-center bg-gray-100 p-4 rounded-lg mt-4">Pour réserver, veuillez vous connecter.</div> )}
-          
+
           <div className="mt-8 pt-6 border-t border-gray-200">
               <h2 className="text-2xl font-semibold text-gray-800 mb-4">Avis des clients</h2>
               <div className="space-y-4">
@@ -284,7 +391,7 @@ function ProfessionalProfilePage() {
                   )}
               </div>
           </div>
-          {currentUser && currentUser.uid !== professional.id && (
+          {currentUser && isClient && currentUser.uid !== professional.id && (
               <div className="mt-8 pt-6 border-t border-gray-200">
                   <h2 className="text-2xl font-semibold text-gray-800 mb-4">Laissez votre avis</h2>
                   <form onSubmit={handleReviewSubmit} className="space-y-4 bg-gray-50 p-6 rounded-lg">
@@ -309,4 +416,5 @@ function ProfessionalProfilePage() {
     </div>
   );
 }
+
 export default ProfessionalProfilePage;

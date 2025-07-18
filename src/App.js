@@ -8,28 +8,35 @@ import AuthModal from './components/AuthModal.js';
 import HomePage from './pages/HomePage.js';
 import ProfessionalListPage from './pages/ProfessionalListPage.js';
 import BlogPage from './pages/BlogPage.js';
-import ArticlePage from './pages/ArticlePage.js'; // On importe la nouvelle page
+import ArticlePage from './pages/ArticlePage.js';
 import AppointmentsPage from './pages/AppointmentsPage.js';
 import ProsPage from './pages/ProsPage.js';
 import ProfessionalProfilePage from './pages/ProfessionalProfilePage.js';
+import AboutPage from './pages/AboutPage.js';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage.js';
+import TermsPage from './pages/TermsPage.js';
+import MessagingPage from './pages/MessagingPage.js'; // Importer la nouvelle page
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
     <BrowserRouter>
-      <div className="App">
+      <div className="App flex flex-col min-h-screen">
         <Header onOpenModal={() => setIsModalOpen(true)} />
-        <main>
+        <main className="flex-grow">
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/liste-prestataires" element={<ProfessionalListPage />} />
             <Route path="/blog" element={<BlogPage />} />
-            {/* 👇 NOUVELLE ROUTE DYNAMIQUE POUR LES ARTICLES 👇 */}
             <Route path="/blog/:slug" element={<ArticlePage />} />
             <Route path="/mes-rendez-vous" element={<AppointmentsPage />} />
             <Route path="/prestataires" element={<ProsPage />} />
             <Route path="/prestataire/:id" element={<ProfessionalProfilePage />} />
+            <Route path="/a-propos" element={<AboutPage />} />
+            <Route path="/politique-de-confidentialite" element={<PrivacyPolicyPage />} />
+            <Route path="/cgv" element={<TermsPage />} />
+            <Route path="/messagerie" element={<MessagingPage />} /> {/* Ajouter la nouvelle route */}
           </Routes>
         </main>
         <Footer />

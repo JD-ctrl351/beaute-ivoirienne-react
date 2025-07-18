@@ -28,7 +28,6 @@ function AuthModal({ onClose }) {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // On vérifie si l'utilisateur a choisi d'être un professionnel
       const accountType = e.target.elements['account_type'].value;
       if (accountType === 'professional') {
           await setDoc(doc(db, "professionals", user.uid), {
@@ -40,13 +39,16 @@ function AuthModal({ onClose }) {
               description: "Profil à compléter.",
               reviews: [],
               services: [],
-              availability: {}
+              availability: {},
+              verified: false, // <-- NOUVEAU: Statut de vérification par défaut
+              gallery: [] // On ajoute un champ galerie vide pour plus tard
           });
       } else {
          await setDoc(doc(db, "clients", user.uid), {
             uid: user.uid,
             name: name,
             email: email,
+            favorites: [] // On ajoute un champ favoris vide pour plus tard
          });
       }
 
@@ -105,7 +107,7 @@ function AuthModal({ onClose }) {
                 {loading ? 'Connexion...' : 'Connexion'}
               </button>
               <p className="text-center text-sm text-gray-600">
-                Pas encore de compte ? 
+                Pas encore de compte ?
                 <button type="button" onClick={() => { setIsLoginView(false); setError(''); }} className="text-orange-500 hover:underline font-semibold ml-1">Créez-en un</button>
               </p>
             </form>
@@ -144,7 +146,7 @@ function AuthModal({ onClose }) {
                 {loading ? 'Création...' : 'Créer mon compte'}
               </button>
               <p className="text-center text-sm text-gray-600">
-                Déjà un compte ? 
+                Déjà un compte ?
                 <button type="button" onClick={() => { setIsLoginView(true); setError(''); }} className="text-orange-500 hover:underline font-semibold ml-1">Connectez-vous</button>
               </p>
             </form>

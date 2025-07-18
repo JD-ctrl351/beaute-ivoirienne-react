@@ -1,12 +1,41 @@
-import React, { useContext } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { getAuth, signOut } from 'firebase/auth';
+import { getAuth, signOut, onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
-// Le Header reçoit maintenant "onOpenModal"
+
 function Header({ onOpenModal }) {
   const { currentUser } = useContext(AuthContext);
+  const [userName, setUserName] = useState(null);
   const auth = getAuth();
+
+  useEffect(() => {
+    if (currentUser) {
+        // Fonction pour chercher le nom dans les collections client ou pro
+        const fetchUserName = async () => {
+            let name = currentUser.email; // Fallback sur l'email
+            const clientRef = doc(db, "clients", currentUser.uid);
+            const clientSnap = await getDoc(clientRef);
+
+            if (clientSnap.exists()) {
+                name = clientSnap.data().name;
+            } else {
+                const proRef = doc(db, "professionals", currentUser.uid);
+                const proSnap = await getDoc(proRef);
+                if (proSnap.exists()) {
+                    name = proSnap.data().name;
+                }
+            }
+            setUserName(name);
+        };
+        fetchUserName();
+    } else {
+        setUserName(null);
+    }
+  }, [currentUser]);
+
 
   const handleLogout = () => {
     signOut(auth).catch((error) => console.error("Erreur de déconnexion", error));
@@ -24,18 +53,20 @@ function Header({ onOpenModal }) {
           <Link to="/liste-prestataires" className="text-gray-700 hover:text-orange-500 transition">Trouver un Prestataire</Link>
           <Link to="/blog" className="text-gray-700 hover:text-orange-500 transition">Conseils Beauté</Link>
           {currentUser && (
-            <Link to="/mes-rendez-vous" className="text-gray-700 hover:text-orange-500 transition">Mes Rendez-vous</Link>
+            <>
+              <Link to="/messagerie" className="text-gray-700 hover:text-orange-500 transition">Messagerie</Link>
+              <Link to="/mes-rendez-vous" className="text-gray-700 hover:text-orange-500 transition">Mes Rendez-vous</Link>
+            </>
           )}
           <Link to="/prestataires" className="text-gray-700 hover:text-orange-500 transition">Espace Pros</Link>
         </nav>
         <div className="flex items-center space-x-4">
           {currentUser ? (
             <>
-              <span className="text-gray-700 text-sm">{currentUser.email}</span>
+              <span className="text-gray-700 text-sm hidden sm:block">{userName}</span>
               <button onClick={handleLogout} className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md text-sm">Déconnexion</button>
             </>
           ) : (
-            // Le bouton utilise maintenant la fonction reçue
             <button onClick={onOpenModal} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg">Se connecter</button>
           )}
         </div>
