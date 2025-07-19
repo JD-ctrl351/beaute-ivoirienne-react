@@ -22,7 +22,6 @@ function MessagingPage() {
     }
 
     const conversationsRef = collection(db, 'conversations');
-    // CORRECTION: On retire le tri de la requête pour éviter le besoin d'un index
     const q = query(
       conversationsRef,
       where('participants', 'array-contains', currentUser.uid)
@@ -31,30 +30,30 @@ function MessagingPage() {
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
       let convos = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      // On trie les conversations ici, dans le code, après les avoir récupérées
       convos.sort((a, b) => {
           const dateA = a.lastMessageTimestamp?.toDate() || 0;
           const dateB = b.lastMessageTimestamp?.toDate() || 0;
           return dateB - dateA;
       });
-
-      const userIds = new Set();
-      convos.forEach(c => c.participants.forEach(id => userIds.add(id)));
+      
+      // On récupère les noms des participants directement depuis les conversations
       const names = {};
-      for (const userId of userIds) {
-        if (!userNames[userId]) {
-            const clientDoc = await getDoc(doc(db, 'clients', userId));
-            if(clientDoc.exists()) {
-                 names[userId] = clientDoc.data().name;
-            } else {
-                const proDoc = await getDoc(doc(db, 'professionals', userId));
-                if(proDoc.exists()) {
-                    names[userId] = proDoc.data().name;
-                }
+      for (const convo of convos) {
+        if (convo.participantNames) {
+          Object.assign(names, convo.participantNames);
+        } else {
+          // Fallback pour les anciennes conversations qui n'auraient pas les noms
+          for (const userId of convo.participants) {
+            if (!names[userId]) {
+              const userDoc = await getDoc(doc(db, 'professionals', userId));
+              if (userDoc.exists()) {
+                names[userId] = userDoc.data().name;
+              }
             }
+          }
         }
       }
-      setUserNames(prev => ({...prev, ...names}));
+      setUserNames(names);
       
       setConversations(convos);
 
@@ -97,7 +96,7 @@ function MessagingPage() {
             <ul>
               {conversations.map(convo => {
                   const otherParticipantId = convo.participants.find(id => id !== currentUser.uid);
-                  const otherParticipantName = userNames[otherParticipantId] || '...';
+                  const otherParticipantName = userNames[otherParticipantId] || 'Chargement...';
                   return (
                     <li
                         key={convo.id}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom'; // Ajout de useNavigate
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, addDoc, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore'; // Ajout de setDoc et serverTimestamp
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, addDoc, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AuthContext } from '../context/AuthContext';
 
@@ -9,7 +9,7 @@ const dayNames = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi",
 function ProfessionalProfilePage() {
   const { id } = useParams();
   const { currentUser } = useContext(AuthContext);
-  const navigate = useNavigate(); // Initialisation de useNavigate
+  const navigate = useNavigate();
 
   const [professional, setProfessional] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -80,30 +80,41 @@ function ProfessionalProfilePage() {
     }
   };
 
-  // NOUVELLE FONCTION POUR CONTACTER LE PROFESSIONNEL
   const handleContact = async () => {
     if (!currentUser || !isClient) return;
 
-    // Créer un ID de conversation unique et trié pour éviter les doublons
-    const conversationId = currentUser.uid > id ? `${currentUser.uid}_${id}` : `${id}_${currentUser.uid}`;
-    const conversationRef = doc(db, 'conversations', conversationId);
-
     try {
-        const docSnap = await getDoc(conversationRef);
-        if (!docSnap.exists()) {
-            // La conversation n'existe pas, on la crée
-            await setDoc(conversationRef, {
-                participants: [currentUser.uid, id],
-                participantNames: [currentUser.displayName, professional.name],
-                lastMessage: "Conversation initiée",
-                lastMessageTimestamp: serverTimestamp(),
-            });
-        }
-        // Rediriger vers la page de messagerie avec l'ID de la conversation
-        navigate(`/messagerie?id=${conversationId}`);
+      // Étape 1: Récupérer le nom du client connecté depuis son document
+      const clientDocRef = doc(db, "clients", currentUser.uid);
+      const clientDocSnap = await getDoc(clientDocRef);
+      if (!clientDocSnap.exists()) {
+        throw new Error("Profil client introuvable.");
+      }
+      const currentUserName = clientDocSnap.data().name;
+
+      // Étape 2: Créer un ID de conversation unique et la référence au document
+      const conversationId = currentUser.uid > id ? `${currentUser.uid}_${id}` : `${id}_${currentUser.uid}`;
+      const conversationRef = doc(db, 'conversations', conversationId);
+      
+      // Étape 3: Créer la conversation si elle n'existe pas, en incluant les noms
+      const docSnap = await getDoc(conversationRef);
+      if (!docSnap.exists()) {
+        await setDoc(conversationRef, {
+          participants: [currentUser.uid, id],
+          participantNames: {
+            [currentUser.uid]: currentUserName,
+            [id]: professional.name
+          },
+          lastMessage: "Conversation initiée",
+          lastMessageTimestamp: serverTimestamp(),
+        });
+      }
+      
+      // Étape 4: Rediriger vers la page de messagerie
+      navigate(`/messagerie?id=${conversationId}`);
     } catch (error) {
-        console.error("Erreur lors de la création de la conversation:", error);
-        alert("Impossible de contacter ce professionnel.");
+      console.error("Erreur lors de la création de la conversation:", error);
+      alert("Impossible de contacter ce professionnel.");
     }
   };
 
@@ -285,7 +296,6 @@ function ProfessionalProfilePage() {
             <p className="text-gray-700 leading-relaxed">{professional.description || 'Aucune description fournie.'}</p>
           </div>
           
-          {/* NOUVEAU BOUTON CONTACTER */}
           {currentUser && isClient && currentUser.uid !== id && (
             <div className="mt-6">
                 <button
