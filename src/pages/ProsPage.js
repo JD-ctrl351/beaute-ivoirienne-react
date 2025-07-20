@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import { db } from '../firebase';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { getAuth, updateProfile } from "firebase/auth";
+import { db, storage } from '../firebase'; // On importe "storage"
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, arrayUnion, arrayRemove, addDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; // Fonctions pour le téléversement
+import { getAuth } from "firebase/auth";
 import { Link, useNavigate } from 'react-router-dom';
 
-const SERVICE_CLIENT_UID = "ET79QIbEM9hDLDg80LYq9jhNbpy2"; 
-const MINIMUM_REVIEWS = 3;
-const MINIMUM_RATING = 4.0;
-
-// Composant pour la fenêtre modale de vérification
+// (Le composant VerificationModal ne change pas, il reste le même)
 function VerificationModal({ proData, onClose, onProfileUpdate }) {
     const { currentUser } = useContext(AuthContext);
     const [phoneNumber, setPhoneNumber] = useState(proData.phoneNumber || '');
@@ -56,16 +53,6 @@ function VerificationModal({ proData, onClose, onProfileUpdate }) {
                     <div><label htmlFor="phoneNumber" className="block font-semibold text-gray-700">Numéro de téléphone</label><input type="tel" id="phoneNumber" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} required className="w-full mt-1 p-2 border rounded-lg"/></div>
                     <div><label htmlFor="dateOfBirth" className="block font-semibold text-gray-700">Date de naissance</label><input type="date" id="dateOfBirth" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} required className="w-full mt-1 p-2 border rounded-lg"/></div>
                     <div><label htmlFor="proofLink" className="block font-semibold text-gray-700">Lien de preuve (Page pro Facebook, Instagram...)</label><input type="url" id="proofLink" placeholder="https://www.instagram.com/moncompte" value={proofLink} onChange={(e) => setProofLink(e.target.value)} required className="w-full mt-1 p-2 border rounded-lg"/></div>
-                    
-                    <div className="space-y-2 pt-4 border-t">
-                        <p className="text-sm text-gray-500 text-center">Le téléversement de documents sera bientôt disponible pour une vérification avancée.</p>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <button type="button" disabled className="bg-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg cursor-not-allowed">Pièce d'identité (Recto)</button>
-                            <button type="button" disabled className="bg-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg cursor-not-allowed">Pièce d'identité (Verso)</button>
-                            <button type="button" disabled className="bg-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg cursor-not-allowed">Selfie</button>
-                        </div>
-                    </div>
-
                     <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg transition shadow-md disabled:bg-gray-400">
                         {loading ? 'Envoi en cours...' : 'Envoyer ma demande'}
                     </button>
@@ -85,10 +72,17 @@ function ProsPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
   
+  // NOUVEAU : États pour gérer le téléversement
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingGallery, setUploadingGallery] = useState(false);
+
   const [editName, setEditName] = useState('');
   const [editDomain, setEditDomain] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  const [editPhotoURL, setEditPhotoURL] = useState('');
+  
+  const MINIMUM_REVIEWS = 3;
+  const MINIMUM_RATING = 4.0;
+  const SERVICE_CLIENT_UID = "ET79QIbEM9hDLDg80LYq9jhNbpy2";
 
   const initialAvailability = {
       lundi: { active: false, start: '09:00', end: '17:00' },
@@ -105,6 +99,7 @@ function ProsPage() {
   const [newServiceDuration, setNewServiceDuration] = useState('');
   const [newServiceDescription, setNewServiceDescription] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
+  const [clientNames, setClientNames] = useState({});
 
   useEffect(() => {
     if (!currentUser) {
@@ -128,12 +123,26 @@ function ProsPage() {
           setEditName(data.name || '');
           setEditDomain(data.domain || '');
           setEditDescription(data.description || '');
-          setEditPhotoURL(data.photoURL || '');
           setAvailability(prev => ({...initialAvailability, ...data.availability}));
+          
           const appointmentsQuery = query(collection(db, "appointments"), where("professionalId", "==", currentUser.uid));
           const appointmentsSnapshot = await getDocs(appointmentsQuery);
           const appointmentsData = appointmentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
           setAppointments(appointmentsData);
+
+          if (appointmentsData.length > 0) {
+            const clientIds = [...new Set(appointmentsData.map(a => a.clientId))];
+            const names = {};
+            for (const clientId of clientIds) {
+                const clientDocRef = doc(db, 'clients', clientId);
+                const clientDocSnap = await getDoc(clientDocRef);
+                if(clientDocSnap.exists()) {
+                    names[clientId] = clientDocSnap.data().name;
+                }
+            }
+            setClientNames(names);
+          }
+
         } else {
           setProData(null);
         }
@@ -154,9 +163,7 @@ function ProsPage() {
         name: editName, 
         domain: editDomain, 
         description: editDescription,
-        photoURL: editPhotoURL
       };
-      await updateProfile(auth.currentUser, { photoURL: editPhotoURL });
       await updateDoc(proDocRef, updatedData);
       
       setProData(prev => ({ ...prev, ...updatedData }));
@@ -168,11 +175,86 @@ function ProsPage() {
     }
   };
 
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingPhoto(true);
+    const storageRef = ref(storage, `images/${currentUser.uid}/profile_${Date.now()}`);
+    
+    try {
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+
+      const proDocRef = doc(db, "professionals", currentUser.uid);
+      await updateDoc(proDocRef, { photoURL: downloadURL });
+
+      setProData(prev => ({ ...prev, photoURL: downloadURL }));
+      alert("Photo de profil mise à jour !");
+    } catch (error) {
+      console.error("Erreur de téléversement de la photo :", error);
+      alert("Une erreur est survenue lors du téléversement.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleGalleryUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingGallery(true);
+    const storageRef = ref(storage, `images/${currentUser.uid}/gallery_${Date.now()}`);
+
+    try {
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+
+      const proDocRef = doc(db, "professionals", currentUser.uid);
+      await updateDoc(proDocRef, { gallery: arrayUnion(downloadURL) });
+
+      setProData(prev => ({ ...prev, gallery: [...(prev.gallery || []), downloadURL] }));
+    } catch (error) {
+      console.error("Erreur de téléversement galerie :", error);
+      alert("Une erreur est survenue.");
+    } finally {
+      setUploadingGallery(false);
+    }
+  };
+
   const handleAppointmentStatus = async (appointmentId, newStatus) => {
     const appointmentRef = doc(db, "appointments", appointmentId);
     try {
       await updateDoc(appointmentRef, { status: newStatus });
-      setAppointments(prev => prev.map(rdv => rdv.id === appointmentId ? { ...rdv, status: newStatus } : rdv));
+      
+      const updatedAppointments = appointments.map(rdv => 
+        rdv.id === appointmentId ? { ...rdv, status: newStatus } : rdv
+      );
+      setAppointments(updatedAppointments);
+
+      const appointment = appointments.find(rdv => rdv.id === appointmentId);
+      if (appointment) {
+        let subject = '';
+        let html = '';
+
+        if (newStatus === 'confirmé') {
+          subject = 'Votre rendez-vous est confirmé !';
+          html = `Bonjour ${clientNames[appointment.clientId] || appointment.clientEmail},<br><br>Bonne nouvelle ! Votre rendez-vous avec <strong>${appointment.professionalName}</strong> a été confirmé.<br>Il aura lieu le ${new Date(appointment.date).toLocaleDateString('fr-FR')} à ${appointment.time}.<br><br>L'équipe Beauté Ivoirienne.`;
+        } else if (newStatus === 'refusé') {
+          subject = 'Information concernant votre rendez-vous';
+          html = `Bonjour ${clientNames[appointment.clientId] || appointment.clientEmail},<br><br>Votre demande de rendez-vous avec <strong>${appointment.professionalName}</strong> le ${new Date(appointment.date).toLocaleDateString('fr-FR')} à ${appointment.time} n'a pas pu être acceptée.<br><br>L'équipe Beauté Ivoirienne.`;
+        } else if (newStatus === 'annulé') {
+            subject = 'Annulation de votre rendez-vous';
+            html = `Bonjour ${clientNames[appointment.clientId] || appointment.clientEmail},<br><br>Votre rendez-vous avec <strong>${appointment.professionalName}</strong> le ${new Date(appointment.date).toLocaleDateString('fr-FR')} à ${appointment.time} a été annulé.<br><br>L'équipe Beauté Ivoirienne.`;
+        }
+
+        if(subject && html) {
+          await addDoc(collection(db, "mail"), {
+            to: appointment.clientEmail,
+            message: { subject, html },
+          });
+        }
+      }
     } catch (error) {
       console.error("Erreur de mise à jour du statut:", error);
       alert("Une erreur est survenue.");
@@ -248,7 +330,7 @@ function ProsPage() {
         <div key={rdv.id} className="border-t pt-4 flex flex-col md:flex-row justify-between items-start">
             <div>
                 <Link to={`/client/${rdv.clientId}`} className="font-bold text-gray-800 hover:underline hover:text-orange-600">
-                    {rdv.clientEmail}
+                    {clientNames[rdv.clientId] || rdv.clientEmail}
                 </Link>
                 <p className="text-sm text-gray-600">{rdv.serviceName}</p>
                 <p className="text-sm text-gray-500">{new Date(rdv.date).toLocaleDateString('fr-FR')} à {rdv.time}</p>
@@ -305,26 +387,29 @@ function ProsPage() {
         {!proData.verified && (
           <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-8 rounded-md shadow" role="alert">
               <p className="font-bold text-lg">Devenez un Professionnel Vérifié</p>
-              <p className="mt-1">Pour gagner la confiance des clients et apparaître en priorité, faites vérifier votre profil.</p>
               
-              <div className="mt-4 bg-white p-4 rounded">
-                  <p className="font-semibold text-gray-800">Prérequis :</p>
-                  <ul className="list-disc list-inside text-sm text-gray-700">
-                      <li className={reviewCount >= MINIMUM_REVIEWS ? 'text-green-600' : 'text-red-600'}>
-                          {reviewCount >= MINIMUM_REVIEWS ? '✔' : '❌'} Avoir au moins {MINIMUM_REVIEWS} avis (actuellement : {reviewCount})
-                      </li>
-                      <li className={averageRating >= MINIMUM_RATING ? 'text-green-600' : 'text-red-600'}>
-                          {averageRating >= MINIMUM_RATING ? '✔' : '❌'} Avoir une note moyenne de {MINIMUM_RATING}/5 (actuellement : {averageRating.toFixed(1)}/5)
-                      </li>
-                  </ul>
-              </div>
-
               {proData.verificationRequested ? (
-                <p className="mt-4 font-semibold text-blue-700">Votre demande de vérification est en cours d'examen.</p>
+                <p className="mt-4 font-semibold text-blue-800 bg-blue-100 p-3 rounded-md">
+                  <i className="fas fa-info-circle mr-2"></i>Votre demande de vérification est en cours d'examen.
+                </p>
               ) : (
-                <button onClick={() => setIsVerificationModalOpen(true)} disabled={!canRequestVerification} className={`mt-4 w-full font-bold py-2 px-4 rounded ${!canRequestVerification ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}>
-                  {canRequestVerification ? 'Demander la vérification' : 'Prérequis non atteints'}
-                </button>
+                <>
+                  <p className="mt-1">Faites vérifier votre profil pour gagner la confiance des clients.</p>
+                  <div className="mt-4 bg-white p-4 rounded">
+                      <p className="font-semibold text-gray-800">Prérequis :</p>
+                      <ul className="list-disc list-inside text-sm text-gray-700">
+                          <li className={reviewCount >= MINIMUM_REVIEWS ? 'text-green-600' : 'text-red-600'}>
+                              {reviewCount >= MINIMUM_REVIEWS ? '✔' : '❌'} Avoir au moins {MINIMUM_REVIEWS} avis ({reviewCount})
+                          </li>
+                          <li className={averageRating >= MINIMUM_RATING ? 'text-green-600' : 'text-red-600'}>
+                              {averageRating >= MINIMUM_RATING ? '✔' : '❌'} Note moyenne de {MINIMUM_RATING}/5 ({averageRating.toFixed(1)}/5)
+                          </li>
+                      </ul>
+                  </div>
+                  <button onClick={() => setIsVerificationModalOpen(true)} disabled={!canRequestVerification} className={`mt-4 w-full font-bold py-2 px-4 rounded ${!canRequestVerification ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}>
+                    Demander la vérification
+                  </button>
+                </>
               )}
           </div>
         )}
@@ -342,22 +427,24 @@ function ProsPage() {
                       {!isEditing ? (
                           <div>
                             <div className="flex items-center space-x-4 mb-6">
-                                  <img src={proData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(proData.name || 'A')}`} className="w-24 h-24 rounded-full object-cover border-4 border-gray-200" alt="Profil"/>
+                                  <div className="relative">
+                                    <img src={proData.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(proData.name || 'A')}`} className="w-24 h-24 rounded-full object-cover border-4 border-gray-200" alt="Profil"/>
+                                    <label htmlFor="photo-upload" className="absolute -bottom-1 -right-1 bg-gray-700 hover:bg-gray-800 text-white p-2 rounded-full cursor-pointer transition">
+                                      {uploadingPhoto ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-camera"></i>}
+                                      <input id="photo-upload" type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} disabled={uploadingPhoto} />
+                                    </label>
+                                  </div>
                                   <div>
                                       <p className="font-bold text-xl">{proData.name}</p>
                                       <p className="text-gray-600">{proData.domain}</p>
                                   </div>
                             </div>
                             <div><label className="font-semibold text-gray-600">Description :</label><p className="whitespace-pre-wrap mt-1">{proData.description || "Non renseignée"}</p></div>
-                            <button onClick={() => setIsEditing(true)} className="mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">Modifier</button>
+                            <button onClick={() => setIsEditing(true)} className="mt-6 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">Modifier les informations</button>
                           </div>
                       ) : (
                           <form onSubmit={handleProfileUpdate} className="space-y-4">
                               <div><label htmlFor="name" className="block font-semibold text-gray-700">Nom public</label><input type="text" id="name" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full mt-1 p-2 border rounded-lg"/></div>
-                              <div>
-                                <label htmlFor="photoURL" className="block font-semibold text-gray-700">URL de la photo de profil</label>
-                                <input type="url" id="photoURL" value={editPhotoURL} onChange={(e) => setEditPhotoURL(e.target.value)} className="w-full mt-1 p-2 border rounded-lg"/>
-                              </div>
                               <div><label htmlFor="domain" className="block font-semibold text-gray-700">Domaine</label><input type="text" id="domain" value={editDomain} onChange={(e) => setEditDomain(e.target.value)} className="w-full mt-1 p-2 border rounded-lg"/></div>
                               <div><label htmlFor="description" className="block font-semibold text-gray-700">Description</label><textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows="5" className="w-full mt-1 p-2 border rounded-lg"/></div>
                               <div className="flex space-x-4"><button type="submit" className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg">Enregistrer</button><button type="button" onClick={() => setIsEditing(false)} className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Annuler</button></div>
@@ -367,7 +454,7 @@ function ProsPage() {
                   
                   <section className="bg-white rounded-xl shadow-md p-8">
                     <h3 className="text-2xl font-semibold text-gray-800 mb-6">Ma Galerie Photos</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 min-h-[8rem]">
                         {proData.gallery && proData.gallery.map((imageUrl, index) => (
                             <div key={index} className="relative group">
                                 <img src={imageUrl} alt={`Galerie ${index + 1}`} className="w-full h-32 object-cover rounded-lg"/>
@@ -377,11 +464,11 @@ function ProsPage() {
                             </div>
                         ))}
                     </div>
-                     <div className="space-y-2 border-t pt-6 text-center">
-                        <p className="text-sm text-gray-500 mb-2">Le téléversement direct des photos n'est pas encore disponible.</p>
-                        <button disabled className="bg-gray-300 text-gray-500 font-bold py-2 px-4 rounded-lg cursor-not-allowed">
-                            Ajouter une image (bientôt)
-                        </button>
+                     <div className="border-t pt-6 text-center">
+                        <label htmlFor="gallery-upload" className={`w-full font-bold py-3 px-6 rounded-lg text-white cursor-pointer inline-block ${uploadingGallery ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600'}`}>
+                          {uploadingGallery ? 'Téléversement en cours...' : 'Ajouter une photo à la galerie'}
+                        </label>
+                        <input id="gallery-upload" type="file" accept="image/*" className="hidden" onChange={handleGalleryUpload} disabled={uploadingGallery} />
                     </div>
                   </section>
                 
@@ -402,12 +489,12 @@ function ProsPage() {
                     </div>
                     <form onSubmit={handleAddService} className="space-y-4 border-t pt-6">
                         <h4 className="text-lg font-semibold text-gray-700">Ajouter un nouveau service</h4>
-                        <div><label htmlFor="service-name" className="block text-sm font-medium text-gray-700">Nom du service</label><input type="text" id="service-name" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
+                        <div><label htmlFor="service-name" className="block text-sm font-medium text-gray-700">Nom</label><input type="text" id="service-name" value={newServiceName} onChange={e => setNewServiceName(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
                         <div className="grid grid-cols-2 gap-4">
                             <div><label htmlFor="service-price" className="block text-sm font-medium text-gray-700">Prix (XOF)</label><input type="number" id="service-price" value={newServicePrice} onChange={e => setNewServicePrice(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
-                            <div><label htmlFor="service-duration" className="block text-sm font-medium text-gray-700">Durée (minutes)</label><input type="number" id="service-duration" value={newServiceDuration} onChange={e => setNewServiceDuration(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
+                            <div><label htmlFor="service-duration" className="block text-sm font-medium text-gray-700">Durée (min)</label><input type="number" id="service-duration" value={newServiceDuration} onChange={e => setNewServiceDuration(e.target.value)} required className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
                         </div>
-                        <div><label htmlFor="service-desc" className="block text-sm font-medium text-gray-700">Description (optionnel)</label><textarea id="service-desc" value={newServiceDescription} onChange={e => setNewServiceDescription(e.target.value)} rows="3" className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
+                        <div><label htmlFor="service-desc" className="block text-sm font-medium text-gray-700">Description</label><textarea id="service-desc" value={newServiceDescription} onChange={e => setNewServiceDescription(e.target.value)} rows="3" className="mt-1 block w-full p-2 border rounded-md shadow-sm"/></div>
                         <button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg">Ajouter le service</button>
                     </form>
                   </section>
@@ -418,12 +505,12 @@ function ProsPage() {
                         {Object.keys(availability).map(day => (
                             <div key={day} className="grid grid-cols-3 items-center gap-4 border-t pt-4">
                                 <div className="flex items-center">
-                                    <input type="checkbox" id={day} checked={availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'active', e.target.checked)} className="h-4 w-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500" />
+                                    <input type="checkbox" id={day} checked={availability[day]?.active || false} onChange={(e) => handleAvailabilityChange(day, 'active', e.target.checked)} className="h-4 w-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500" />
                                     <label htmlFor={day} className="ml-3 block text-sm font-medium text-gray-700 capitalize">{day}</label>
                                 </div>
                                 <div className="col-span-2 grid grid-cols-2 gap-2">
-                                    <input type="time" value={availability[day].start} disabled={!availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'start', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
-                                    <input type="time" value={availability[day].end} disabled={!availability[day].active} onChange={(e) => handleAvailabilityChange(day, 'end', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
+                                    <input type="time" value={availability[day]?.start || '09:00'} disabled={!availability[day]?.active} onChange={(e) => handleAvailabilityChange(day, 'start', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
+                                    <input type="time" value={availability[day]?.end || '17:00'} disabled={!availability[day]?.active} onChange={(e) => handleAvailabilityChange(day, 'end', e.target.value)} className="p-2 border rounded-lg disabled:opacity-50" />
                                 </div>
                             </div>
                         ))}

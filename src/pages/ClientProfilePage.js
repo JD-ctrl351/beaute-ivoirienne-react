@@ -21,7 +21,7 @@ function ClientProfilePage() {
         }
       } catch (err) {
         console.error("Erreur de chargement du profil client:", err);
-        setError("Vous n'avez pas la permission de voir ce profil.");
+        setError("Une erreur est survenue lors du chargement du profil.");
       } finally {
         setLoading(false);
       }
@@ -34,7 +34,7 @@ function ClientProfilePage() {
   if (error) return <div className="text-center py-16 text-red-500">{error}</div>;
   if (!client) return null;
 
-  const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(client.name)}&background=dbeafe&color=1e40af&size=128&bold=true`;
+  const avatarUrl = client.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(client.name)}&background=dbeafe&color=1e40af&size=128&bold=true`;
 
   return (
     <div className="container mx-auto px-4 py-16">
@@ -45,6 +45,11 @@ function ClientProfilePage() {
             <p className="text-md text-gray-600 mt-2">
                 <i className="fas fa-envelope mr-2 text-gray-400"></i>{client.email}
             </p>
+            {client.isDisabled && (
+                 <p className="mt-4 font-bold text-red-600 bg-red-100 px-4 py-2 rounded-lg">
+                    Ce compte est actuellement désactivé.
+                </p>
+            )}
         </div>
       </div>
     </div>

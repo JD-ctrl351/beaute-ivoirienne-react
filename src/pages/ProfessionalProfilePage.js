@@ -84,7 +84,6 @@ function ProfessionalProfilePage() {
     if (!currentUser || !isClient) return;
 
     try {
-      // Étape 1: Récupérer le nom du client connecté depuis son document
       const clientDocRef = doc(db, "clients", currentUser.uid);
       const clientDocSnap = await getDoc(clientDocRef);
       if (!clientDocSnap.exists()) {
@@ -92,11 +91,9 @@ function ProfessionalProfilePage() {
       }
       const currentUserName = clientDocSnap.data().name;
 
-      // Étape 2: Créer un ID de conversation unique et la référence au document
       const conversationId = currentUser.uid > id ? `${currentUser.uid}_${id}` : `${id}_${currentUser.uid}`;
       const conversationRef = doc(db, 'conversations', conversationId);
       
-      // Étape 3: Créer la conversation si elle n'existe pas, en incluant les noms
       const docSnap = await getDoc(conversationRef);
       if (!docSnap.exists()) {
         await setDoc(conversationRef, {
@@ -110,7 +107,6 @@ function ProfessionalProfilePage() {
         });
       }
       
-      // Étape 4: Rediriger vers la page de messagerie
       navigate(`/messagerie?id=${conversationId}`);
     } catch (error) {
       console.error("Erreur lors de la création de la conversation:", error);
@@ -194,6 +190,21 @@ function ProfessionalProfilePage() {
     };
     try {
       await addDoc(collection(db, "appointments"), newAppointment);
+      
+      await addDoc(collection(db, "mail"), {
+        to: professional.email,
+        message: {
+          subject: "Nouvelle demande de rendez-vous !",
+          html: `
+            Bonjour ${professional.name},<br><br>
+            Vous avez une nouvelle demande de rendez-vous de la part de <strong>${currentUser.displayName || currentUser.email}</strong> pour la prestation "${selectedService.name}".<br>
+            Date : ${selectedDay.toLocaleDateString('fr-FR')} à ${selectedTime}.<br><br>
+            Veuillez vous connecter à votre Espace Pro pour la confirmer ou la refuser.<br><br>
+            L'équipe Beauté Ivoirienne.
+          `,
+        },
+      });
+
       alert(`Votre demande de rendez-vous a bien été envoyée !`);
       setSelectedService(null);
       setSelectedDay(null);

@@ -1,20 +1,22 @@
-// Importez les fonctions Firebase nécessaires
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage"; // <-- AJOUT IMPORTANT
 
-// Votre configuration Firebase
+// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDR8xPcRVZ0CYzh6YeofkVljMXTJtHZjlc",
   authDomain: "beaute-ivoirienne-app.firebaseapp.com",
   projectId: "beaute-ivoirienne-app",
-  storageBucket: "beaute-ivoirienne-app.firebasestorage.app",
+  // Mettez ici le nom du NOUVEAU dossier de stockage (bucket) que vous avez créé en Europe
+  storageBucket: "photos-beaute-ivoirienne-app",
   messagingSenderId: "246413335382",
-  appId: "1:246413335382:web:390fd9736da133539e54f7",
-  measurementId: "G-8SZ6CZZ364"
+  appId: "G-8SZ6CZZ364"
 };
 
-// Initialisez Firebase
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-
-// Exportez une instance de la base de données Firestore pour l'utiliser dans d'autres fichiers
+export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app); // <-- AJOUT IMPORTANT

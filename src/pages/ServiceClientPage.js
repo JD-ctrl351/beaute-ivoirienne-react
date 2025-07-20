@@ -2,11 +2,11 @@ import React, { useState, useEffect, useContext } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, onSnapshot, doc, getDoc, getDocs, orderBy, updateDoc, deleteField } from 'firebase/firestore'; 
+import { collection, query, where, onSnapshot, doc, getDoc, getDocs, orderBy, updateDoc, deleteField } from 'firebase/firestore';
 import ChatWindow from '../components/ChatWindow';
 
 // ✅ Mettez ici l'UID de votre Service Client
-const SERVICE_CLIENT_UID = "ET79QIbEM9hDLDg80LYq9jhNbpy2"; 
+const SERVICE_CLIENT_UID = "ET79QIbEM9hDLDg80LYq9jhNbpy2";
 
 function ServiceClientPage() {
   const { currentUser } = useContext(AuthContext);
@@ -23,14 +23,20 @@ function ServiceClientPage() {
 
   const fetchData = async () => {
     try {
-      const requestsQuery = query(collection(db, "professionals"), where("verificationRequested", "==", true), where("verified", "==", false));
+      // Requête pour les demandes de vérification en attente
+      const requestsQuery = query(
+        collection(db, "professionals"),
+        where("verificationRequested", "==", true),
+      );
       const requestsSnapshot = await getDocs(requestsQuery);
       setVerificationRequests(requestsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      
+
+      // Requête pour tous les clients
       const clientsQuery = query(collection(db, "clients"), orderBy("name"));
       const clientsSnapshot = await getDocs(clientsQuery);
       setAllClients(clientsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
 
+      // Requête pour tous les professionnels
       const professionalsQuery = query(collection(db, "professionals"), orderBy("name"));
       const professionalsSnapshot = await getDocs(professionalsQuery);
       setAllProfessionals(professionalsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -47,14 +53,17 @@ function ServiceClientPage() {
       return;
     }
     
+    // Sécurité : Seul le service client peut accéder à cette page
     if (currentUser.uid !== SERVICE_CLIENT_UID) {
       setError("Accès non autorisé.");
       setLoading(false);
+      navigate('/'); // Redirection vers l'accueil
       return;
     }
 
     fetchData();
 
+    // Logique pour la messagerie...
     const conversationsRef = collection(db, 'conversations');
     const q = query(
       conversationsRef,
@@ -111,52 +120,54 @@ function ServiceClientPage() {
     });
 
     return () => unsubscribe();
-  }, [currentUser]);
+  }, [currentUser, navigate]);
 
   const handleApproveVerification = async (proId) => {
-    if (!window.confirm("Voulez-vous approuver ce professionnel ? Il sera visible par tous les clients.")) return;
+    if (!window.confirm("Voulez-vous vraiment approuver ce professionnel ? Il recevra le badge 'Vérifié'.")) return;
     const proDocRef = doc(db, "professionals", proId);
     try {
       await updateDoc(proDocRef, {
         verified: true,
-        verificationRequested: deleteField()
+        verificationRequested: deleteField() // Supprime le champ de demande
       });
-      alert("Professionnel approuvé !");
-      fetchData();
+      alert("Professionnel approuvé avec succès !");
+      fetchData(); // Rafraîchir les données
     } catch (error) {
       console.error("Erreur lors de l'approbation :", error);
-      alert("Une erreur est survenue.");
+      alert("Une erreur est survenue lors de l'approbation.");
     }
   };
   
   const handleRefuseVerification = async (proId) => {
     const reason = prompt("Veuillez indiquer la raison du refus (optionnel). Cette information n'est pas envoyée au professionnel pour le moment.");
+    // Si l'admin clique sur "Annuler", la raison sera `null`. On arrête tout.
     if (reason === null) return;
     
     const proDocRef = doc(db, "professionals", proId);
     try {
       await updateDoc(proDocRef, {
-        verificationRequested: deleteField()
+        verificationRequested: deleteField(), // Supprime le champ de demande
+        // On pourrait ajouter un champ `verificationStatus: 'refused'` si on voulait garder une trace
       });
       alert("La demande de vérification a été refusée.");
-      fetchData();
+      fetchData(); // Rafraîchir les données
     } catch (error) {
       console.error("Erreur lors du refus :", error);
-      alert("Une erreur est survenue.");
+      alert("Une erreur est survenue lors du refus.");
     }
   };
   
-  const handleToggleAccountStatus = async (userId, userType, currentStatus) => {
-    const action = currentStatus ? "réactiver" : "désactiver";
+  const handleToggleAccountStatus = async (userId, userType, isDisabled) => {
+    const action = isDisabled ? "réactiver" : "désactiver";
     if (!window.confirm(`Voulez-vous vraiment ${action} ce compte ?`)) return;
 
     const collectionName = userType === 'client' ? 'clients' : 'professionals';
     const userDocRef = doc(db, collectionName, userId);
 
     try {
-      await updateDoc(userDocRef, { isDisabled: !currentStatus });
+      await updateDoc(userDocRef, { isDisabled: !isDisabled });
       alert(`Le compte a été ${action} avec succès.`);
-      fetchData();
+      fetchData(); // Rafraîchir les données
     } catch (error) {
       console.error(`Erreur lors de la tentative de ${action} le compte:`, error);
       alert("Une erreur est survenue.");
@@ -170,9 +181,7 @@ function ServiceClientPage() {
 
   if (loading) return <div className="text-center py-16">Chargement du dashboard...</div>;
   if (error) return <div className="text-center py-16 text-red-500">{error}</div>;
-  if (!currentUser) {
-    return null;
-  }
+  if (!currentUser) return null;
 
   return (
     <div className="container mx-auto px-4 py-12">
@@ -184,16 +193,16 @@ function ServiceClientPage() {
             <div className="space-y-4">
               {verificationRequests.map(pro => (
                 <div key={pro.id} className="p-4 bg-white rounded-lg shadow">
-                    <div className="flex items-start justify-between">
-                        <div>
-                            <Link to={`/prestataire/${pro.id}`} className="font-bold text-lg text-blue-600 hover:underline">{pro.name}</Link>
+                    <div className="flex items-start justify-between flex-wrap">
+                        <div className="mb-2">
+                            <Link to={`/prestataire/${pro.id}`} target="_blank" className="font-bold text-lg text-blue-600 hover:underline">{pro.name}</Link>
                             <p className="text-sm text-gray-600">{pro.email}</p>
                         </div>
                         <div className="flex space-x-2 flex-shrink-0">
-                           <button onClick={() => handleRefuseVerification(pro.id)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded text-sm">
+                           <button onClick={() => handleRefuseVerification(pro.id)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded text-sm transition-colors">
                                 Refuser
                            </button>
-                           <button onClick={() => handleApproveVerification(pro.id)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded text-sm">
+                           <button onClick={() => handleApproveVerification(pro.id)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded text-sm transition-colors">
                                 Approuver
                            </button>
                         </div>
