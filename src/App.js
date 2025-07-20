@@ -15,7 +15,9 @@ import ProfessionalProfilePage from './pages/ProfessionalProfilePage.js';
 import AboutPage from './pages/AboutPage.js';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage.js';
 import TermsPage from './pages/TermsPage.js';
-import MessagingPage from './pages/MessagingPage.js'; // Importer la nouvelle page
+import MessagingPage from './pages/MessagingPage.js';
+import ClientProfilePage from './pages/ClientProfilePage.js';
+import ServiceClientPage from './pages/ServiceClientPage.js'; // 1. Importer la nouvelle page
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -33,10 +35,12 @@ function App() {
             <Route path="/mes-rendez-vous" element={<AppointmentsPage />} />
             <Route path="/prestataires" element={<ProsPage />} />
             <Route path="/prestataire/:id" element={<ProfessionalProfilePage />} />
+            <Route path="/client/:id" element={<ClientProfilePage />} />
+            <Route path="/service-client-dashboard" element={<ServiceClientPage />} /> {/* 2. Ajouter la route */}
             <Route path="/a-propos" element={<AboutPage />} />
             <Route path="/politique-de-confidentialite" element={<PrivacyPolicyPage />} />
             <Route path="/cgv" element={<TermsPage />} />
-            <Route path="/messagerie" element={<MessagingPage />} /> {/* Ajouter la nouvelle route */}
+            <Route path="/messagerie" element={<MessagingPage />} />
           </Routes>
         </main>
         <Footer />

@@ -37,9 +37,9 @@ function Footer() {
           <div>
             <h3 className="text-lg font-semibold text-white mb-4">Suivez-nous</h3>
             <div className="flex justify-center md:justify-start space-x-4">
-                <a href="#" className="hover:text-orange-400 transition text-2xl"><i className="fab fa-facebook"></i></a>
-                <a href="#" className="hover:text-orange-400 transition text-2xl"><i className="fab fa-instagram"></i></a>
-                <a href="#" className="hover:text-orange-400 transition text-2xl"><i className="fab fa-tiktok"></i></a>
+                <a href="#" className="hover:text-orange-400 transition text-2xl"><i className="fa-brands fa-facebook"></i></a>
+                <a href="#" className="hover:text-orange-400 transition text-2xl"><i className="fa-brands fa-instagram"></i></a>
+                <a href="#" className="hover:text-orange-400 transition text-2xl"><i className="fa-brands fa-tiktok"></i></a>
             </div>
           </div>
         </div>

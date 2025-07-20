@@ -2,22 +2,24 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { getAuth, updateProfile } from "firebase/auth"; // Importer updateProfile
 import { Link } from 'react-router-dom';
 
 function AppointmentsPage() {
   const { currentUser } = useContext(AuthContext);
+  const auth = getAuth();
 
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isProfessional, setIsProfessional] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
 
-  const [clientName, setClientName] = useState('');
+  const [clientData, setClientData] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editPhotoURL, setEditPhotoURL] = useState(''); // État pour la photo
 
   const [favoriteProfiles, setFavoriteProfiles] = useState([]);
-
 
   useEffect(() => {
     if (!currentUser) {
@@ -35,34 +37,30 @@ function AppointmentsPage() {
         } else {
           setIsProfessional(false);
           
-          // CORRECTION: Simplification de la requête et ajout du tri côté client
           const q = query(collection(db, "appointments"), where("clientId", "==", currentUser.uid));
           const querySnapshot = await getDocs(q);
           
           let appointmentsData = querySnapshot.docs.map(doc => {
             const data = doc.data();
-            // Assurez-vous que createdAt est un objet Date pour le tri
             return { 
               id: doc.id, 
               ...data,
               createdAt: data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)
             };
           });
-
-          // Tri des rendez-vous par date de création (du plus récent au plus ancien)
           appointmentsData.sort((a, b) => b.createdAt - a.createdAt);
-          
           setAppointments(appointmentsData);
 
           const clientDocRef = doc(db, "clients", currentUser.uid);
           const clientDocSnap = await getDoc(clientDocRef);
           if (clientDocSnap.exists()) {
-            const clientData = clientDocSnap.data();
-            setClientName(clientData.name);
-            setEditName(clientData.name);
+            const data = clientDocSnap.data();
+            setClientData(data);
+            setEditName(data.name || '');
+            setEditPhotoURL(data.photoURL || ''); // Initialiser l'URL de la photo
 
-            if (clientData.favorites && clientData.favorites.length > 0) {
-                const favPromises = clientData.favorites.map(favId => getDoc(doc(db, "professionals", favId)));
+            if (data.favorites && data.favorites.length > 0) {
+                const favPromises = data.favorites.map(favId => getDoc(doc(db, "professionals", favId)));
                 const favDocs = await Promise.all(favPromises);
                 const favProfiles = favDocs.filter(d => d.exists()).map(docSnap => ({id: docSnap.id, ...docSnap.data()}));
                 setFavoriteProfiles(favProfiles);
@@ -75,7 +73,6 @@ function AppointmentsPage() {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [currentUser]);
 
@@ -83,24 +80,33 @@ function AppointmentsPage() {
     e.preventDefault();
     const clientDocRef = doc(db, "clients", currentUser.uid);
     try {
-        await updateDoc(clientDocRef, { name: editName });
-        setClientName(editName);
+        const updatedData = { 
+            name: editName,
+            photoURL: editPhotoURL
+        };
+        // Mettre à jour le profil d'authentification
+        await updateProfile(auth.currentUser, { 
+            displayName: editName,
+            photoURL: editPhotoURL
+        });
+        // Mettre à jour le document Firestore
+        await updateDoc(clientDocRef, updatedData);
+        
+        setClientData(prev => ({...prev, ...updatedData}));
         setIsEditing(false);
-        alert("Nom mis à jour avec succès !");
+        alert("Profil mis à jour avec succès !");
     } catch (error) {
         console.error("Erreur de mise à jour du profil:", error);
         alert("Une erreur est survenue.");
     }
   };
 
-  // Logique de filtrage améliorée
   const today = new Date();
-  today.setHours(0, 0, 0, 0); // Pour comparer uniquement les dates
+  today.setHours(0, 0, 0, 0);
 
   const pendingAppointments = appointments.filter(rdv => rdv.status === 'en attente');
   const upcomingAppointments = appointments.filter(rdv => rdv.status === 'confirmé' && new Date(rdv.date) >= today);
   const pastAppointments = appointments.filter(rdv => rdv.status !== 'en attente' && new Date(rdv.date) < today);
-
 
   const renderAppointments = (list) => {
     if (list.length === 0) {
@@ -200,12 +206,19 @@ function AppointmentsPage() {
             <h3 className="text-2xl font-semibold text-gray-800 mb-6">Mon Profil</h3>
             {!isEditing ? (
                 <div>
-                    <div className="space-y-4">
-                        <div><label className="font-semibold text-gray-600">Nom :</label><p>{clientName}</p></div>
-                        <div><label className="font-semibold text-gray-600">Email :</label><p>{currentUser.email}</p></div>
+                    <div className="flex flex-col items-center text-center space-y-4">
+                        <img 
+                            src={clientData?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(clientData?.name || 'A')}&background=dbeafe&color=1e40af`}
+                            alt="Profil"
+                            className="w-24 h-24 rounded-full object-cover border-4 border-gray-200"
+                        />
+                        <div>
+                            <p className="font-bold text-xl">{clientData?.name}</p>
+                            <p className="text-gray-600">{currentUser.email}</p>
+                        </div>
                     </div>
                     <button onClick={() => setIsEditing(true)} className="mt-6 w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
-                        Modifier le nom
+                        Modifier le profil
                     </button>
                 </div>
             ) : (
@@ -213,6 +226,10 @@ function AppointmentsPage() {
                     <div>
                         <label htmlFor="name" className="block font-semibold text-gray-700">Nom</label>
                         <input type="text" id="name" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full mt-1 p-2 border rounded-lg"/>
+                    </div>
+                     <div>
+                        <label htmlFor="photoURL" className="block font-semibold text-gray-700">URL de la photo de profil</label>
+                        <input type="url" id="photoURL" value={editPhotoURL} onChange={(e) => setEditPhotoURL(e.target.value)} className="w-full mt-1 p-2 border rounded-lg"/>
                     </div>
                      <div>
                         <label className="block font-semibold text-gray-700">Email</label>

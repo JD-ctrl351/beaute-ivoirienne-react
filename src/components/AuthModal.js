@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signOut } from 'firebase/auth';
 import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 function AuthModal({ onClose }) {
   const [isLoginView, setIsLoginView] = useState(true);
@@ -17,6 +17,7 @@ function AuthModal({ onClose }) {
     const name = e.target.elements['signup-name'].value;
     const email = e.target.elements['signup-email'].value;
     const password = e.target.elements['signup-password'].value;
+    const photoURL = e.target.elements['signup-photo'].value;
 
     if (password.length < 6) {
       setError("Le mot de passe doit faire au moins 6 caractères.");
@@ -28,27 +29,37 @@ function AuthModal({ onClose }) {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+      await updateProfile(user, {
+        displayName: name,
+        photoURL: photoURL || ''
+      });
+
       const accountType = e.target.elements['account_type'].value;
       if (accountType === 'professional') {
           await setDoc(doc(db, "professionals", user.uid), {
               uid: user.uid,
               name: name,
               email: email,
+              photoURL: photoURL || '',
               domain: "Non spécifié",
               commune: "Non spécifiée",
               description: "Profil à compléter.",
               reviews: [],
               services: [],
               availability: {},
-              verified: false, // <-- NOUVEAU: Statut de vérification par défaut
-              gallery: [] // On ajoute un champ galerie vide pour plus tard
+              verified: false,
+              isAdmin: false,
+              isDisabled: false,
+              gallery: []
           });
       } else {
          await setDoc(doc(db, "clients", user.uid), {
             uid: user.uid,
             name: name,
             email: email,
-            favorites: [] // On ajoute un champ favoris vide pour plus tard
+            photoURL: photoURL || '',
+            isDisabled: false,
+            favorites: []
          });
       }
 
@@ -75,7 +86,27 @@ function AuthModal({ onClose }) {
     const password = e.target.elements['login-password'].value;
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // VÉRIFICATION DU STATUT DU COMPTE
+      let userDoc;
+      const clientRef = doc(db, "clients", user.uid);
+      userDoc = await getDoc(clientRef);
+
+      if (!userDoc.exists()) {
+        const proRef = doc(db, "professionals", user.uid);
+        userDoc = await getDoc(proRef);
+      }
+
+      if (userDoc.exists() && userDoc.data().isDisabled) {
+        // Si le compte est désactivé, on affiche une erreur et on le déconnecte
+        await signOut(auth);
+        setError("Votre compte a été désactivé. Veuillez contacter le service client.");
+        setLoading(false);
+        return;
+      }
+
       onClose();
     } catch (err) {
       setError("Email ou mot de passe incorrect.");
@@ -127,6 +158,10 @@ function AuthModal({ onClose }) {
               <div>
                 <label htmlFor="signup-password" className="block text-gray-700 mb-2">Mot de passe</label>
                 <input type="password" id="signup-password" className="w-full px-4 py-2 border rounded-lg" required />
+              </div>
+              <div>
+                <label htmlFor="signup-photo" className="block text-gray-700 mb-2">URL de la photo de profil (Optionnel)</label>
+                <input type="url" id="signup-photo" placeholder="https://..." className="w-full px-4 py-2 border rounded-lg" />
               </div>
                <div className="pt-2">
                     <label className="block text-gray-700 mb-2">Vous êtes :</label>

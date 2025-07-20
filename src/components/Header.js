@@ -1,21 +1,26 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { getAuth, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { getAuth, signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
+// ✅ IMPORTANT : Collez l'UID de votre Service Client ici
+const SERVICE_CLIENT_UID = "ET79QIbEM9hDLDg80LYq9jhNbpy2";
+const SERVICE_CLIENT_NAME = "Service Client";
 
 function Header({ onOpenModal }) {
   const { currentUser } = useContext(AuthContext);
   const [userName, setUserName] = useState(null);
   const auth = getAuth();
+  const navigate = useNavigate();
+
+  const isServiceClient = currentUser && currentUser.uid === SERVICE_CLIENT_UID;
 
   useEffect(() => {
     if (currentUser) {
-        // Fonction pour chercher le nom dans les collections client ou pro
         const fetchUserName = async () => {
-            let name = currentUser.email; // Fallback sur l'email
+            let name = currentUser.email;
             const clientRef = doc(db, "clients", currentUser.uid);
             const clientSnap = await getDoc(clientRef);
 
@@ -36,6 +41,36 @@ function Header({ onOpenModal }) {
     }
   }, [currentUser]);
 
+  const handleContactServiceClient = async () => {
+    if (!currentUser) {
+        alert("Veuillez vous connecter pour contacter le service client.");
+        return;
+    }
+    if (isServiceClient) {
+        navigate('/service-client-dashboard');
+        return;
+    }
+    try {
+        const conversationId = currentUser.uid > SERVICE_CLIENT_UID ? `${currentUser.uid}_${SERVICE_CLIENT_UID}` : `${SERVICE_CLIENT_UID}_${currentUser.uid}`;
+        const conversationRef = doc(db, 'conversations', conversationId);
+        const docSnap = await getDoc(conversationRef);
+        if (!docSnap.exists()) {
+            await setDoc(conversationRef, {
+                participants: [currentUser.uid, SERVICE_CLIENT_UID],
+                participantNames: {
+                    [currentUser.uid]: userName,
+                    [SERVICE_CLIENT_UID]: SERVICE_CLIENT_NAME
+                },
+                lastMessage: "Conversation initiée avec le service client.",
+                lastMessageTimestamp: serverTimestamp(),
+            });
+        }
+        navigate(`/messagerie?id=${conversationId}`);
+    } catch (error) {
+        console.error("Erreur lors de la création de la conversation avec le service client:", error);
+        alert("Impossible de joindre le service client pour le moment.");
+    }
+  };
 
   const handleLogout = () => {
     signOut(auth).catch((error) => console.error("Erreur de déconnexion", error));
@@ -45,22 +80,31 @@ function Header({ onOpenModal }) {
     <header className="bg-white shadow-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 py-3 flex justify-between items-center">
         <Link to="/" className="flex items-center">
-          <i className="fas fa-palette text-2xl text-orange-500 mr-2"></i>
+          <i className="fa-solid fa-palette text-2xl text-orange-500 mr-2"></i>
           <h1 className="text-xl font-bold text-gray-800">Beauté Ivoirienne</h1>
         </Link>
-        <nav className="hidden md:flex space-x-8">
+        <nav className="hidden md:flex space-x-8 items-center">
           <Link to="/" className="text-gray-700 hover:text-orange-500 transition">Accueil</Link>
           <Link to="/liste-prestataires" className="text-gray-700 hover:text-orange-500 transition">Trouver un Prestataire</Link>
           <Link to="/blog" className="text-gray-700 hover:text-orange-500 transition">Conseils Beauté</Link>
-          {currentUser && (
-            <>
-              <Link to="/messagerie" className="text-gray-700 hover:text-orange-500 transition">Messagerie</Link>
-              <Link to="/mes-rendez-vous" className="text-gray-700 hover:text-orange-500 transition">Mes Rendez-vous</Link>
-            </>
+          {currentUser && !isServiceClient && (
+            <Link to="/mes-rendez-vous" className="text-gray-700 hover:text-orange-500 transition">Mes Rendez-vous</Link>
           )}
-          <Link to="/prestataires" className="text-gray-700 hover:text-orange-500 transition">Espace Pros</Link>
+          
+          {isServiceClient ? (
+             <Link to="/service-client-dashboard" className="text-gray-700 hover:text-orange-500 transition font-bold">Dashboard Admin</Link>
+          ) : (
+             <Link to="/prestataires" className="text-gray-700 hover:text-orange-500 transition">Espace Pros</Link>
+          )}
+
         </nav>
         <div className="flex items-center space-x-4">
+          {currentUser && (
+              <button onClick={handleContactServiceClient} title="Contacter le service client" className="text-gray-600 hover:text-orange-500 transition text-xl">
+                <i className="fa-solid fa-headset"></i>
+              </button>
+          )}
+
           {currentUser ? (
             <>
               <span className="text-gray-700 text-sm hidden sm:block">{userName}</span>

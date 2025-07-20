@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Link, useLocation } from 'react-router-dom'; // useLocation pour lire l'URL
+import { Link, useLocation } from 'react-router-dom';
 
 function ProfessionalListPage() {
   const [professionals, setProfessionals] = useState([]);
   const [loading, setLoading] = useState(true);
-  const location = useLocation(); // Hook pour accéder à l'URL actuelle
+  const location = useLocation();
 
-  // On initialise les filtres à partir des paramètres de l'URL
   const queryParams = new URLSearchParams(location.search);
   const [nameFilter, setNameFilter] = useState('');
   const [domainFilter, setDomainFilter] = useState(queryParams.get('domaine') || '');
@@ -19,8 +18,12 @@ function ProfessionalListPage() {
     const fetchProfessionals = async () => {
       try {
         const querySnapshot = await getDocs(collection(db, "professionals"));
-        const prosData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setProfessionals(prosData);
+        const allProsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // On filtre pour retirer les admins ET les comptes désactivés
+        const regularProsData = allProsData.filter(pro => !pro.isAdmin && !pro.isDisabled);
+
+        setProfessionals(regularProsData);
       } catch (error) {
         console.error("Erreur de chargement des prestataires: ", error);
       } finally {
@@ -107,9 +110,9 @@ function ProfessionalListPage() {
             <div className="flex-grow">
               <div className="flex items-center mb-4">
                 <img
-                  src={`https://ui-avatars.com/api/?name=${encodeURIComponent(pro.name)}&background=ffedd5&color=f97316&size=128&bold=true`}
+                  src={pro.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(pro.name)}&background=ffedd5&color=f97316&size=128&bold=true`}
                   alt={`Avatar de ${pro.name}`}
-                  className="w-16 h-16 rounded-full mr-4"
+                  className="w-16 h-16 rounded-full mr-4 object-cover"
                 />
                 <div>
                   <h3 className="text-xl font-semibold text-gray-800 flex items-center">
