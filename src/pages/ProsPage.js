@@ -72,7 +72,6 @@ function ProsPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [isVerificationModalOpen, setIsVerificationModalOpen] = useState(false);
   
-  // NOUVEAU : États pour gérer le téléversement
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingGallery, setUploadingGallery] = useState(false);
 
@@ -316,7 +315,8 @@ function ProsPage() {
     const proDocRef = doc(db, "professionals", currentUser.uid);
     try {
         await updateDoc(proDocRef, { gallery: arrayRemove(imageUrlToDelete) });
-        setProData(prev => ({ ...prev, gallery: prev.gallery.filter(url => url !== imageUrlToDelete) }));
+        // 👇 **CORRECTION 2 : GESTION SÉCURISÉE DE LA SUPPRESSION**
+        setProData(prev => ({ ...prev, gallery: (prev.gallery || []).filter(url => url !== imageUrlToDelete) }));
         alert("Image supprimée.");
     } catch (error) {
         console.error("Erreur lors de la suppression de l'image:", error);
@@ -455,7 +455,8 @@ function ProsPage() {
                   <section className="bg-white rounded-xl shadow-md p-8">
                     <h3 className="text-2xl font-semibold text-gray-800 mb-6">Ma Galerie Photos</h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 min-h-[8rem]">
-                        {proData.gallery && proData.gallery.map((imageUrl, index) => (
+                        {/* 👇 **CORRECTION 1 : GESTION SÉCURISÉE DE L'AFFICHAGE** */}
+                        {(proData.gallery || []).map((imageUrl, index) => (
                             <div key={index} className="relative group">
                                 <img src={imageUrl} alt={`Galerie ${index + 1}`} className="w-full h-32 object-cover rounded-lg"/>
                                 <button onClick={() => handleDeleteImage(imageUrl)} className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">

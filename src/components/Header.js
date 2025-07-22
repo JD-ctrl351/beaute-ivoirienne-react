@@ -1,11 +1,14 @@
+// src/components/Header.js
+
 import React, { useContext, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { getAuth, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import Notifications from './Notifications'; // <-- AJOUT 1 : Importer le nouveau composant
 
-// ✅ IMPORTANT : Collez l'UID de votre Service Client ici
+// L'UID du service client reste le même
 const SERVICE_CLIENT_UID = "ET79QIbEM9hDLDg80LYq9jhNbpy2";
 const SERVICE_CLIENT_NAME = "Service Client";
 
@@ -100,9 +103,12 @@ function Header({ onOpenModal }) {
         </nav>
         <div className="flex items-center space-x-4">
           {currentUser && (
-              <button onClick={handleContactServiceClient} title="Contacter le service client" className="text-gray-600 hover:text-orange-500 transition text-xl">
-                <i className="fa-solid fa-headset"></i>
-              </button>
+              <> {/* AJOUT : Englober dans un fragment */}
+                <button onClick={handleContactServiceClient} title="Contacter le service client" className="text-gray-600 hover:text-orange-500 transition text-xl">
+                  <i className="fa-solid fa-headset"></i>
+                </button>
+                <Notifications /> {/* <-- AJOUT 2 : Placer le composant ici */}
+              </>
           )}
 
           {currentUser ? (

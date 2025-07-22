@@ -1,3 +1,5 @@
+// src/pages/ProfessionalProfilePage.js
+
 import React, { useState, useEffect, useContext } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, addDoc, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -203,6 +205,15 @@ function ProfessionalProfilePage() {
             L'équipe Beauté Ivoirienne.
           `,
         },
+      });
+
+      // AJOUT : Créer une notification pour le professionnel
+      await addDoc(collection(db, "notifications"), {
+        userId: professional.id, // L'ID du professionnel qui reçoit la notif
+        message: `Vous avez une nouvelle demande de RDV de ${currentUser.displayName || currentUser.email}.`,
+        link: '/prestataires', // Lien vers la page des RDV pro
+        isRead: false,
+        createdAt: serverTimestamp(),
       });
 
       alert(`Votre demande de rendez-vous a bien été envoyée !`);
